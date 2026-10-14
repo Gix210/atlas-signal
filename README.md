@@ -10,32 +10,36 @@ A Claude Code slash command that turns a live TradingView chart into a structure
 
 ## What it produces
 
+A real run of `/atlas SPY stock day`, made after the close on October 14, 2026:
+
 ```
 Signal Alert
 
-- Current Price: 751.84
-- Timeframe: today's close (5)
+- Current Price: 769.62
+- Timeframe: end of day (15), based on the Oct 14 close; levels for the next session
 
 Long
-- Entry: 752.22
-- TP1: 754.10
-- TP2: 756.40
-- SL: 750.95
+- Entry: 770.00
+- TP1: 770.31
+- TP2: 774.62
+- SL: 766.70
 
 Short
-- Entry: 751.46
-- TP1: 749.90
-- TP2: 748.05
-- SL: 752.80
+- Entry: 768.40
+- TP1: 767.08
+- TP2: 763.79
+- SL: 770.90
 
 Reason:
-- Price Action: above VWAP 751.28, above 9 EMA 751.70, above 20 EMA 751.53
-- Key Levels: recent high 756.40, recent low 748.05, VWAP 751.28 (closest, immediate support)
+- Price Action: below VWAP 770.31, above 9 EMA 768.78, below 20 EMA 769.76
+- Key Levels: recent high 772.60, recent low 766.70, VWAP 770.31 (closest, immediate resistance)
 - News and Metrics: Manual check recommended (no news source connected)
-- Impact: hold 752.22 and 754.10 is next; lose 751.46 and 749.90 is next
+- Impact: hold 770.00 and 770.31 is next; lose 768.40 and 767.08 is next
 ```
 
-*Illustrative numbers. Each run also attaches a screenshot of the chart it analyzed.*
+![SPY 15-minute chart analyzed by the run above](docs/atlas_SPY_day.png)
+
+The long side of this run shows the main weakness the [backtest](#backtest) found: TP1 is $0.31 above the entry while the stop is $3.30 below it.
 
 ## Methodology
 
@@ -80,6 +84,20 @@ When `option` is passed, the command does not invent strikes. TradingView's opti
 - **No fabricated data.** Missing RSI shows as `n/a`, missing options data is stated, and the news section asks for a manual check. Every signal ends with a disclaimer that the levels are technical-only.
 - **Market-state awareness.** On weekends or holidays, the signal is framed as levels for the next session's open.
 
+## Backtest
+
+I replayed the rules on every 15-minute bar of SPY from January 2 to October 14, 2026 (197 sessions), using only the data the command would have seen at each moment. Full method and tables: [backtest/RESULTS.md](backtest/RESULTS.md).
+
+| One signal per day (10:15 ET bar) | Long | Short |
+|---|---|---|
+| TP1 hit before stop | 49.5% | 52.2% |
+| Stopped out | 22.2% | 22.2% |
+| Still open at the close | 28.3% | 25.6% |
+| Median reward:risk to TP1 | 0.40 | 0.37 |
+| Expectancy per trade | −0.066 R | −0.080 R |
+
+TP1 gets hit more than twice as often as the stop, yet the rules still lose money: TP1 sits about 0.4 R from entry, so they would need to win about 70% of the time to break even. Roughly a third of setups also have a target on the wrong side of the entry. These results set the next version's priorities: tie targets and stops to volatility (ATR), reject setups with reward:risk below 1, and test again.
+
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code)
@@ -100,7 +118,7 @@ Or clone this repo and run Claude Code from inside it. The command is picked up 
 
 - Technical levels only. No order flow, gamma exposure (GEX), or options Greeks.
 - No news feed. Earnings dates, macro releases and headlines have to be checked by hand.
-- The rules are fixed heuristics. They have not been backtested, and nothing here measures their hit rate.
+- The rules are fixed heuristics, and the [backtest](#backtest) shows they lose money in their current form.
 
 ## Disclaimer
 

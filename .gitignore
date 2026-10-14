@@ -1,3 +1,5 @@
 .DS_Store
-*.png
 .claude/settings.local.json
+__pycache__/
+# market data is TradingView/exchange licensed: export it locally, never commit it
+backtest/*.json
