@@ -10,7 +10,7 @@ A Claude Code slash command that turns a live TradingView chart into a structure
 
 ## What it produces
 
-A real run of `/atlas SPY stock day`, made after the close on October 14, 2026:
+A real run of `/atlas SPY stock day` (v2 rules), made after the close on October 14, 2026:
 
 ```
 Signal Alert
@@ -20,26 +20,28 @@ Signal Alert
 
 Long
 - Entry: 770.00
-- TP1: 770.31
-- TP2: 774.62
-- SL: 766.70
+- TP1: 773.28
+- TP2: 776.55
+- SL: 768.37
+- R:R to TP1: 2.00
 
 Short
 - Entry: 768.40
-- TP1: 767.08
-- TP2: 763.79
-- SL: 770.90
+- TP1: 765.13
+- TP2: 761.85
+- SL: 770.04
+- R:R to TP1: 2.00
 
 Reason:
 - Price Action: below VWAP 770.31, above 9 EMA 768.78, below 20 EMA 769.76
 - Key Levels: recent high 772.60, recent low 766.70, VWAP 770.31 (closest, immediate resistance)
 - News and Metrics: Manual check recommended (no news source connected)
-- Impact: hold 770.00 and 770.31 is next; lose 768.40 and 767.08 is next
+- Impact: hold 770.00 and 773.28 is next; lose 768.40 and 765.13 is next
 ```
 
 ![SPY 15-minute chart analyzed by the run above](docs/atlas_SPY_day.png)
 
-The long side of this run shows the main weakness the [backtest](#backtest) found: TP1 is $0.31 above the entry while the stop is $3.30 below it.
+On the same chart, the v1 rules put the long target $0.31 above the entry and the stop $3.30 below it. v2 puts the target $3.28 above and the stop $1.63 below. The [backtest](#backtest) explains the change, and why it still isn't an edge.
 
 ## Methodology
 
@@ -58,21 +60,22 @@ Any raw TradingView resolution (`1`, `5`, `15`, `60`, `240`, `D`, `W`, `M`) also
 
 - **VWAP**, session-anchored: Σ(typical price × volume) / Σ(volume), where typical price = (H + L + C) / 3. The session start is detected as the last gap of more than one hour between bars.
 - **9 EMA and 20 EMA**: standard exponential moving averages, smoothing factor k = 2 / (n + 1).
-- **Swing levels**: highest high and lowest low of the last 20 bars, plus the second-highest and second-lowest local extremes (excluding the two most recent bars).
+- **ATR(14)**: average true range with Wilder smoothing, the way TradingView computes it.
+- **Swing levels**: highest high and lowest low of the last 20 bars, plus the second-highest and second-lowest local extremes (excluding the two most recent bars). They feed the Reason block and the optional confluence filter.
 - **RSI**: read from the chart if it's already there, otherwise reported as `n/a`.
 
-### Level construction
+### Level construction (v2)
 
 A price buffer is scaled to the instrument's typical volatility: 0.05% for index ETFs (SPY, QQQ, IWM), 0.15% for single stocks, 0.25% for crypto.
 
 | Level | Long rule |
 |-------|-----------|
-| Entry | max(last price, 9 EMA) + buffer (breakout); last price + buffer if already extended above the 9 EMA |
-| TP1   | VWAP if price is below it; otherwise the closer of the prior swing high or entry + 0.3% |
-| TP2   | the further of the 20-bar high or entry + 0.6% |
-| SL    | min(20 EMA, prior swing low) − buffer |
+| Entry | max(last price, 9 EMA) + buffer: a breakout entry, unchanged from v1 |
+| SL    | entry − 1.5 × ATR |
+| TP1   | entry + 2 × the stop distance (3 ATR) |
+| TP2   | entry + 4 × the stop distance (6 ATR) |
 
-The short side mirrors these rules.
+The short side mirrors these rules. The 1.5 ATR stop and the 2:1 target were picked from 12 variants by a rule fixed before testing ([plan](backtest/v2-plan.md)). A side is printed as `No valid long setup: {reason}` when its target or stop is on the wrong side of the entry, or when reward:risk is below 1. With the current settings every setup passes, so the check is there to catch future rule changes. An optional confluence filter (off, because it didn't help in the backtest) only takes longs above VWAP with no swing high between the entry and TP1. Shorts mirror it. The v1 rules are in the [changelog](CHANGELOG.md).
 
 ### Options contracts
 
@@ -81,28 +84,34 @@ When `option` is passed, the command does not invent strikes. TradingView's opti
 ## Design decisions
 
 - **Compute indicators in-page instead of adding studies.** TradingView's Basic plan caps user indicators at two, and the MCP's add-indicator tool fails silently. Running the math in a single JavaScript call against the chart's own bar data is exact and costs one round-trip.
-- **No fabricated data.** Missing RSI shows as `n/a`, missing options data is stated, and the news section asks for a manual check. Every signal ends with a disclaimer that the levels are technical-only.
+- **Rules live in code.** In v1, Claude worked out the levels from rules written in prose, so two runs could compute them differently, and the backtest couldn't be sure it was testing what the command did. In v2, the in-page script computes every level and Claude only formats the output. [`check_parity.py`](backtest/check_parity.py) runs that same script in Node against the backtest's data and confirms every level matches to the cent on all 4,823 bars.
+- **No fabricated data.** Missing RSI shows as `n/a`, missing options data is stated, and the news section asks for a manual check. Every signal ends with a disclaimer that states the backtest result.
 - **Market-state awareness.** On weekends or holidays, the signal is framed as levels for the next session's open.
 
 ## Backtest
 
-I replayed the rules on every 15-minute bar of SPY from January 2 to October 14, 2026 (197 sessions), using only the data the command would have seen at each moment. Full method and tables: [backtest/RESULTS.md](backtest/RESULTS.md).
+I tested the rules on every 15-minute bar of SPY from January 2 to October 14, 2026 (197 sessions). Each test used only the data the command would have seen at that moment and charged $0.02 per share for spread and slippage. Full method and tables: [backtest/RESULTS.md](backtest/RESULTS.md).
 
-| One signal per day (10:15 ET bar) | Long | Short |
+v1 showed no edge. For v2, I [wrote the test plan down and committed it](backtest/v2-plan.md) before running anything: 12 variants of ATR-based stops and targets, with the best one picked on January–June data only and then checked once on July–October.
+
+| Average result per trade, after costs | Jan–Jun (variant picked here) | Jul–Oct (not seen during selection) |
 |---|---|---|
-| TP1 hit before stop | 49.5% | 52.2% |
-| Stopped out | 22.2% | 22.2% |
-| Still open at the close | 28.3% | 25.6% |
-| Median reward:risk to TP1 | 0.40 | 0.37 |
-| Expectancy per trade | −0.066 R | −0.080 R |
+| v1 | −0.117 R | −0.102 R |
+| v2 | −0.019 R | −0.063 R |
 
-TP1 gets hit more than twice as often as the stop, yet the rules still lose money: TP1 sits about 0.4 R from entry, so they would need to win about 70% of the time to break even. Roughly a third of setups also have a target on the wrong side of the entry. These results set the next version's priorities: tie targets and stops to volatility (ATR), reject setups with reward:risk below 1, and test again.
+*R = the distance from entry to stop, so −0.10 R means losing a tenth of the amount risked per trade. Signals from every bar, long and short pooled.*
+
+v2 loses less, but it has no edge either: on the July–October data its 95% confidence interval runs from −0.148 R to +0.031 R. Two other findings shaped the conclusions:
+
+- **v2's targets rarely come into play.** TP1 is 3 ATR away and gets hit first on only 7–13% of trades, while 55–62% are still open at the close. In practice v2 is a breakout entry with a wide stop, held to the close.
+- **15-minute bars can't settle everything.** When one bar touches both the stop and the target, the data can't say which came first. Assuming the stop came first, v1 loses 0.10–0.12 R per trade. Assuming the target came first, it breaks even. v2 stays negative either way.
 
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code)
 - TradingView Desktop, running
 - [tradingview-mcp-jackson](https://github.com/LewisWJackson/tradingview-mcp-jackson) connected to Claude Code
+- To rerun the backtest: Python 3 and Node.js
 
 ## Install
 
@@ -118,7 +127,7 @@ Or clone this repo and run Claude Code from inside it. The command is picked up 
 
 - Technical levels only. No order flow, gamma exposure (GEX), or options Greeks.
 - No news feed. Earnings dates, macro releases and headlines have to be checked by hand.
-- The rules are fixed heuristics, and the [backtest](#backtest) shows they lose money in their current form.
+- No demonstrated edge. The [backtest](#backtest) covers SPY, the `day` setting and January–October 2026 only. Other symbols and timeframes run the same rules untested.
 
 ## Disclaimer
 

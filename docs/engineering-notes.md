@@ -26,3 +26,9 @@ The same `awaitPromise: false` setting applies to `ui_evaluate`. The injected fu
 ## Session detection for VWAP
 
 VWAP resets each session. The bar series doesn't flag session boundaries, so the command treats the most recent gap of more than one hour between consecutive bars as the session open. This works for regular-hours equities and ETFs. Crypto and other 24-hour markets have no such gap. An earlier version then treated only the latest bar as the session, which made VWAP equal to that bar's typical price. The command now falls back to anchoring VWAP at the most recent 00:00 UTC.
+
+## Testing the in-page script outside TradingView
+
+The levels come from a JavaScript function that runs inside the TradingView page, so the backtest (Python) and the command could silently drift apart. `backtest/check_parity.py` closes that gap. It pulls the script out of the command file and runs it in Node against a stand-in for the four calls the script makes to TradingView's chart API: `activeChart()`, `_chartWidget.model().mainSeries()`, `bars()` and `valueAt(i)`. For each bar, the stand-in serves the 300 bars a freshly opened chart would have loaded. The check then compares every value with the Python backtest.
+
+Both sides perform the same floating-point operations in the same order, so they agree to within 10⁻¹² rather than merely to the cent. Running the script in TradingView itself on the live SPY chart also matched the backtest exactly.
